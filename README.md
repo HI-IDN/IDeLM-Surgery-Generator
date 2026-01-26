@@ -58,27 +58,55 @@ This makes the generator suitable for:
 
 ## 🚀 Installation
 
-This repository currently contains the project scaffold.  
-Full implementation and examples will be added soon.
+The project uses a standard `src/` layout with Python packaging via `pyproject.toml`.
 
 ```bash
 git clone https://github.com/HI-IDN/IDeLM-Surgery-Generator
 cd IDeLM-Surgery-Generator
+
+# (optional) create a virtual environment
+python -m venv .venv
+source .venv/bin/activate
+
+# install dependencies
+pip install -e .
 ```
-TODO (Setup instructions will be included once the codebase is uploaded.)
 
-## 🔧 Usage (Coming Soon)
-The generator will expose a high‑level API for producing:
+## 📂 Project Layout
 
-- Synthetic waiting lists
-- Multi‑week schedules
-- Benchmark scenarios
-- Simulation‑ready input formats
+```
+IDeLM-Surgery-Generator/
+├── pyproject.toml       # project metadata and dependencies
+├── src/
+│   ├── __init__.py
+│   ├── main.py          # entrypoint: python -m src.main
+│   ├── generate_all_data.py
+│   ├── models.py        # core dataclasses
+│   ├── type_aliases.py  # shared type definitions
+│   └── generators/      # modular generators
+│       ├── params.py
+│       ├── frequency_data.py
+│       ├── duration_data.py
+│       ├── schedule.py
+│       ├── patterns.py
+│       ├── window_data.py
+│       ├── admission_data.py
+│       ├── waiting_list.py
+│       └── initial_plan.py
+```
+
+## 🔧 Usage
+
+Run the default data generation pipeline (uses built‑in parameters):
+
+```bash
+python -m src.main
+```
 
 Example usage scripts will be included in the `examples/` directory.
 
 ## 📘 Documentation
-Comprehensive documentation—including module descriptions, configuration files, and sample output formats—will be added as development continues.
+Module‑level docstrings describe inputs/outputs; fuller docs and examples will be added.
 
 ## 📄 How to Cite
 If you use the **IDeLM‑Surgery‑Generator** in academic work, please cite the accompanying paper:
