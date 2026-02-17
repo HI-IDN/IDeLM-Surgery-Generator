@@ -14,11 +14,10 @@ The generator produces a comprehensive multi‑component representation of an op
 - Synthetic surgery type–surgeon frequencies  
 - Surgeon workload and specialization profiles  
 - Log‑normal duration distributions for each procedure  
-- Planning and operation windows reflecting scheduling flexibility  
+- Priority rules (operate‑by targets and allowed plan changes)  
 - ICU and inpatient ward admission probabilities and length‑of‑stay distributions  
-- Room–weekday surgery patterns (“templates”)  
+- Slot‑based OR schedules derived from surgeon frequencies  
 - A synthetic waiting list with realistic attributes  
-- An initial multi‑week OR schedule derived from patterns and surgeon availability  
 
 This makes the generator suitable for:
 
@@ -48,9 +47,9 @@ This makes the generator suitable for:
 | Surgery frequencies | Power‑law‑based frequency model across procedures |
 | Surgeon profiles | Specialization groups and log‑normal activity levels |
 | Duration model | Procedure‑specific log‑normal duration parameters |
-| Planning/operation windows | Percentile‑based models of scheduling flexibility |
+| Priority model | Operate‑by targets and allowed plan changes |
 | Postoperative model | ICU/ward admission probabilities and LOS distributions |
-| Room–day patterns | Typical combinations of surgeries for each OR and weekday |
+| Schedule | Slot‑based OR assignment by room and weekday |
 | Waiting‑list entries | Synthetic requests with realistic features |
 | Initial schedule | Multi‑week OR plan based on patterns and fullness |
 
@@ -88,11 +87,9 @@ IDeLM-Surgery-Generator/
 │       ├── frequency_data.py
 │       ├── duration_data.py
 │       ├── schedule.py
-│       ├── patterns.py
-│       ├── window_data.py
+│       ├── priority.py
 │       ├── admission_data.py
-│       ├── waiting_list.py
-│       └── initial_plan.py
+│       └── waiting_list.py
 ```
 
 ## 🔧 Usage
