@@ -1,6 +1,8 @@
+from typing import TypedDict
+
 from pydantic import BaseModel, Field
 
-from .type_aliases import Day, OperationCard, Room, Surgeon, TimeWindow
+from .type_aliases import Day, OperationCard, Room, Surgeon
 
 _global_id_counter = 0
 
@@ -21,8 +23,7 @@ class Surgery(BaseModel):
     surgeon_id: Surgeon
     expected_duration: int  # in minutes
     days_since_registration: int
-    planning_window: TimeWindow
-    operation_window: TimeWindow
+    operate_by: Day
     allowed_changes: int
     changes_done: int = 0
     allowed_days_moved_plus: int
@@ -39,3 +40,10 @@ class Surgery(BaseModel):
     def is_planned(self) -> bool:
         """Check if the surgery is planned."""
         return self.planned_room is not None and self.planned_day is not None
+
+
+class DurationCell(TypedDict):
+    mu: float
+    sigma: float
+    gamma: float
+    kappa: float

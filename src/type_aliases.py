@@ -10,9 +10,3 @@ OperationId: TypeAlias = int
 # A schedule is a mapping from (surgeon_index, room_index, weekday_index)
 # to a desirability score.
 Schedule: TypeAlias = Dict[Tuple[Surgeon, Room, Weekday], float]
-
-# A pattern is a sequence of surgery cards, represented as a tuple of strings.
-Pattern: TypeAlias = Tuple[OperationCard, ...]
-
-# TimeWindow
-TimeWindow: TypeAlias = Tuple[int, int]  # (start_time, end_time)

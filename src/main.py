@@ -12,14 +12,11 @@ def main():
         frequency_params=pm.FrequencyParams(),
         duration_params=pm.DurationParams(),
         schedule_params=pm.ScheduleParams(),
-        pattern_params=pm.PatternParams(),
-        window_params=pm.WindowParams(),
+        priority_params=pm.PriorityParams(),
         admission_params=pm.AdmissionParams(),
-        waiting_list_params=pm.WaitingListParams(),
-        initial_plan_params=pm.InitialPlanParams(),
     )
     print("Data generation complete.")
-    print(f"Generated {len(data[7])} surgeries in the waiting list.")
+    print(f"Generated {len(data[5])} surgeries in the waiting list.")
 
 
 if __name__ == "__main__":

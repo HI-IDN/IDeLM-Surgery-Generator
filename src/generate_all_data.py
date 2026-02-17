@@ -1,40 +1,29 @@
-from typing import Dict, List, Tuple, TypeAlias, Union
+from typing import Dict, List, Tuple, TypeAlias
 
 import numpy as np
-
-from .type_aliases import (
-    OperationCard,
-    Pattern,
-    Room,
-    Schedule,
-    Surgeon,
-    TimeWindow,
-    Weekday,
-)
 
 from . import generators
 from .generators.params import (
     AdmissionParams,
     DurationParams,
     FrequencyParams,
-    InitialPlanParams,
-    PatternParams,
+    PriorityParams,
     ScheduleParams,
-    WaitingListParams,
-    WindowParams,
 )
-from .models import Surgery
+from .models import DurationCell, Surgery
+from .type_aliases import (
+    OperationCard,
+    Schedule,
+    Surgeon,
+)
 
 AllData: TypeAlias = Tuple[
     Dict[Tuple[OperationCard, Surgeon], float],  # frequency_data
-    Dict[OperationCard, int],  # card_groups
-    Dict[OperationCard, Tuple[float, float]],  # duration_data
+    Dict[Tuple[OperationCard, Surgeon], DurationCell],  # duration_data
     Schedule,  # schedule
-    Dict[Tuple[Weekday, Room], List[Pattern]],  # patterns
-    Dict[OperationCard, Dict[str, Union[TimeWindow, int]]],  # window_data
+    Dict[OperationCard, Dict[str, int]],  # priority_data
     Dict[OperationCard, Dict[str, float | Tuple[float, float]]],  # admission_data
     List[Surgery],  # waiting_list
-    List[Surgery],  # initial_plan
 ]
 
 
@@ -47,11 +36,8 @@ def generate_all_data(
     frequency_params: FrequencyParams,
     duration_params: DurationParams,
     schedule_params: ScheduleParams,
-    pattern_params: PatternParams,
-    window_params: WindowParams,
+    priority_params: PriorityParams,
     admission_params: AdmissionParams,
-    waiting_list_params: WaitingListParams,
-    initial_plan_params: InitialPlanParams,
 ) -> AllData:
     """Generates all data required for the simulation based on the given parameters.
 
@@ -73,16 +59,10 @@ def generate_all_data(
         Parameters for generating duration data.
     schedule_params : ScheduleParams
         Parameters for generating the schedule.
-    pattern_params : PatternParams
-        Parameters for generating surgery patterns.
-    window_params : WindowParams
-        Parameters for generating time windows.
+    priority_params : PriorityParams
+        Parameters for generating priority data.
     admission_params : AdmissionParams
         Parameters for generating admission data.
-    waiting_list_params : WaitingListParams
-        Parameters for generating the waiting list.
-    initial_plan_params : InitialPlanParams
-        Parameters for generating the initial plan.
 
     Returns
     -------
@@ -92,7 +72,7 @@ def generate_all_data(
     ss = np.random.SeedSequence(seed)
     rngs = [np.random.default_rng(s) for s in ss.spawn(8)]
     weekdays: list[int] = [0, 1, 2, 3, 4]  # Monday to Friday
-    frequency_data, card_groups = generators.generate_frequency_data(
+    frequency_data = generators.generate_frequency_data(
         num_operation_cards=n_operation_cards,
         num_surgeons=n_surgeons,
         params=frequency_params,
@@ -110,16 +90,9 @@ def generate_all_data(
         params=schedule_params,
         rng=rngs[2],
     )
-    patterns = generators.generate_patterns(
+    priority_data = generators.generate_priority_data(
         frequency_data=frequency_data,
-        schedule=schedule,
-        duration_distributions=duration_data,
-        params=pattern_params,
-        rng=rngs[3],
-    )
-    window_data = generators.generate_window_data(
-        frequency_data=frequency_data,
-        params=window_params,
+        params=priority_params,
         rng=rngs[4],
     )
     admission_data = generators.generate_admission_data(
@@ -131,33 +104,17 @@ def generate_all_data(
         n=waiting_list_size,
         frequency_data=frequency_data,
         duration_data=duration_data,
-        window_data=window_data,
+        priority_data=priority_data,
         admission_data=admission_data,
-        params=waiting_list_params,
         admission_dist=True,
         rng=rngs[6],
     )
 
-    initial_plan = generators.generate_initial_plan(
-        pattern_data=patterns,
-        schedule=schedule,
-        frequency_data=frequency_data,
-        duration_data=duration_data,
-        window_data=window_data,
-        admission_data=admission_data,
-        params=initial_plan_params,
-        admission_dist=True,
-        rng=rngs[7],
-    )
-
     return (
         frequency_data,
-        card_groups,
         duration_data,
         schedule,
-        patterns,
-        window_data,
+        priority_data,
         admission_data,
         waiting_list,
-        initial_plan,
     )

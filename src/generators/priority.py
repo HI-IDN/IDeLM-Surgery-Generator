@@ -1,18 +1,18 @@
 from collections import defaultdict
-from typing import Dict, Optional, Tuple, Union
+from typing import Dict, Optional, Tuple
 
 import numpy as np
 
-from ..type_aliases import OperationCard, Surgeon, TimeWindow
-from .params import WindowParams
+from ..type_aliases import OperationCard, Surgeon
+from .params import PriorityParams
 
 
-def generate_window_data(
+def generate_priority_data(
     frequency_data: Dict[Tuple[OperationCard, Surgeon], float],
-    params: WindowParams,
+    params: PriorityParams,
     rng: Optional[np.random.Generator] = None,
-) -> Dict[OperationCard, Dict[str, Union[TimeWindow, int]]]:
-    """Generate planning and operation windows for operation cards based on their frequencies.
+) -> Dict[OperationCard, Dict[str, int]]:
+    """Generate operate_by day and allowed_changes for operation cards based on their frequencies.
 
     Parameters
     ----------
@@ -20,18 +20,17 @@ def generate_window_data(
         Dictionary mapping (operation card, surgeon) pairs to their frequencies.
         This indicates how often each surgeon performs each operation card.
         Frequencies are used to determine the planning and operation windows.
-    params : WindowParams
-        Parameters for generating the windows, including splits for different percentiles.
+    params : PriorityParams
+        Parameters for generating the priority data, including splits for different percentiles.
     rng: Optional[np.random.Generator], optional
         An optional random number generator instance for reproducibility, by default None
 
     Returns
     -------
-    Dict[OperationCard, Dict[str, Union[TimeWindow, int]]]
-        A dictionary mapping operation cards to their planning and operation windows, and allowed changes.
-        Each entry contains a dictionary with keys "planning_window", "operation_window", and "allowed_changes".
-        - "planning_window" is a tuple (start, end) indicating the planning period.
-        - "operation_window" is a tuple (start, end) indicating the operation period.
+    Dict[OperationCard, Dict[str, int]]
+        A dictionary mapping operation cards to their operate_by day and allowed_changes
+        Each entry contains a dictionary with keys "operate_by" and "allowed_changes".
+        - "operate_by" is an integer indicating the day by which the surgery should be performed.
         - "allowed_changes" is an integer indicating how many changes are allowed in the plan.
     """
 
@@ -57,7 +56,7 @@ def generate_window_data(
         return params.splits[sorted_percentiles[0]]  # type: ignore
 
     # Result
-    window_data: Dict[str, Dict[str, Union[Tuple[int, int], int]]] = {}
+    priority_data: Dict[str, Dict[str, int]] = {}
 
     for i, (card, _) in enumerate(sorted_cards):
         percentile = (i / total_cards) * 100
@@ -66,16 +65,12 @@ def generate_window_data(
         def sample_range(split: Tuple[int, int]) -> int:
             return int(rng.integers(split[0], split[1] + 1))
 
-        plan_start = sample_range(split["plan_start_range"])
-        plan_len = sample_range(split["plan_len_range"])
-        op_start = sample_range(split["op_start_range"])
-        op_len = sample_range(split["op_len_range"])
+        operate_by = sample_range(split["operate_by_range"])
         allowed_changes = sample_range(split["allowed_changes_range"])
 
-        window_data[card] = {
-            "planning_window": (plan_start, plan_start + plan_len),
-            "operation_window": (op_start, op_start + op_len),
+        priority_data[card] = {
+            "operate_by": operate_by,
             "allowed_changes": allowed_changes,
         }
 
-    return window_data
+    return priority_data
