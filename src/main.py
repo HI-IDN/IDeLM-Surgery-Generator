@@ -6,6 +6,7 @@ def main():
     data = generate_all_data(
         n_rooms=5,
         n_surgeons=10,
+        or_capacity=480.0,
         n_operation_cards=100,
         waiting_list_size=50,
         seed=42,
