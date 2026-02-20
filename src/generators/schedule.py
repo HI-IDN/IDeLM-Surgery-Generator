@@ -1,16 +1,11 @@
-from collections import defaultdict
+from __future__ import annotations
+
 from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 
+from ..type_aliases import OperationCard, Room, Schedule, Surgeon, Weekday
 from .params import ScheduleParams
-from ..type_aliases import (
-    OperationCard,
-    Room,
-    Schedule,
-    Surgeon,
-    Weekday,
-)
 
 
 def generate_schedule(
@@ -20,117 +15,138 @@ def generate_schedule(
     params: ScheduleParams,
     rng: Optional[np.random.Generator] = None,
 ) -> Schedule:
-    """Generate a schedule based on surgeon frequencies and room availability.
+    """
+    Generate master surgical schedule as desirability scores.
+
+    Master Surgical Schedule
+    -------------------------
+    This function generates a "master surgical schedule" that captures surgeon
+    preferences and availability patterns. For each surgeon, it assigns desirability
+    weights to (room, weekday) pairs, representing:
+
+    - Historical patterns: Which room-day combinations a surgeon typically uses
+    - Preferences: Preferred operating rooms and days
+    - Availability: When/where a surgeon is available to operate
+
+    The output serves as a soft constraint in surgical scheduling optimization:
+    - High weight → surgeon typically operates here (preferred assignment)
+    - Low weight → surgeon rarely operates here (unusual, may incur penalty)
+    - Zero weight → surgeon never operates here (hard constraint)
+
+    Dirichlet-Based Generation
+    ---------------------------
+    Each surgeon's preferences are sampled from a Dirichlet distribution over all
+    (room, weekday) pairs. The concentration parameter controls schedule focus:
+
+    - Low concentration → Focused schedule (surgeon has 1-2 primary room-day combos)
+    - High concentration → Spread out schedule (surgeon operates across many combos)
+
+    Busier surgeons optionally have more spread-out schedules (controlled by
+    workload_scaling parameter), reflecting that high-volume surgeons need more
+    operating time and thus use more room-day slots.
+
+    The sparsity_threshold parameter zeros out low-probability assignments, creating
+    realistic sparse schedules where surgeons operate only on specific days.
 
     Parameters
     ----------
     frequency_data : Dict[Tuple[OperationCard, Surgeon], float]
         Dictionary mapping (operation card, surgeon) pairs to their frequencies.
-        This indicates how often each surgeon performs each operation card.
+        Used to compute each surgeon's total workload (sum of frequencies).
     rooms : List[Room]
-        List of available rooms for surgeries.
+        List of available operating rooms.
     weekdays : List[Weekday]
-        List of weekdays for scheduling surgeries.
+        List of weekdays for scheduling.
     params : ScheduleParams
-        Parameters for schedule generation
-    rng: Optional[np.random.Generator], optional
-        An optional random number generator instance for reproducibility, by default None
+        Parameters controlling schedule generation (concentration, workload scaling,
+        sparsity threshold).
+    rng : Optional[np.random.Generator]
+        Random number generator for reproducibility.
 
     Returns
     -------
     Schedule
-        A dictionary mapping (surgeon, room, weekday) to the fraction of slots assigned to that surgeon
-        in that room on that weekday. The values are normalized to sum to 1 across all surgeons for each room and weekday.
+        Dictionary mapping (surgeon, room, weekday) tuples to desirability weights.
+        For each surgeon, weights sum to 1.0 across all (room, day) pairs.
+        Only non-zero weights are included (sparse representation).
+
+        Example:
+        {
+            ("Surgeon_A", "OR_1", "Monday"): 0.45,      # Primary slot
+            ("Surgeon_A", "OR_1", "Wednesday"): 0.40,   # Secondary slot
+            ("Surgeon_A", "OR_2", "Monday"): 0.10,      # Occasional
+            ("Surgeon_A", "OR_3", "Friday"): 0.05,      # Rare
+            ("Surgeon_B", "OR_2", "Tuesday"): 0.70,     # Highly focused
+            ("Surgeon_B", "OR_2", "Thursday"): 0.25,
+            ("Surgeon_B", "OR_1", "Tuesday"): 0.05,
+        }
+
+    Notes
+    -----
+    This representation provides a probabilistic desirability measure that can be
+    used in optimization models as:
+
+    - Objective function weights (maximize assignment to preferred room-days)
+    - Soft constraint penalties (penalize deviation from typical patterns)
+    - Feasibility checks (zero weight = infeasible assignment)
+
+    The Dirichlet-based approach ensures:
+    - Weights are non-negative and sum to 1 per surgeon (valid probability distribution)
+    - Natural variance between surgeons (different concentration parameters)
+    - Consistency with other generator modules (frequency, duration all use Dirichlet)
     """
     if rng is None:
         rng = np.random.default_rng()
 
-    # Step 1: Compute total frequency per surgeon
-    surgeon_totals: Dict[Surgeon, float] = {}
+    # Step 1: Compute total workload per surgeon
+    surgeon_workloads: Dict[Surgeon, float] = {}
     for (_, surgeon), freq in frequency_data.items():
-        surgeon_totals[surgeon] = surgeon_totals.get(surgeon, 0.0) + freq
+        surgeon_workloads[surgeon] = surgeon_workloads.get(surgeon, 0.0) + freq
 
-    total_weight = sum(surgeon_totals.values())
-    surgeons = list(surgeon_totals.keys())
+    surgeons = list(surgeon_workloads.keys())
 
-    # Step 2: Create all slots: (room, weekday, slot_index)
-    slots: List[Tuple[Room, Weekday, int]] = [
-        (room, day, slot_idx)
-        for day in weekdays
-        for room in rooms
-        for slot_idx in range(params.slots_per_day)
-    ]
-    total_slots = len(slots)
+    # Step 2: Create all (room, weekday) pairs
+    room_day_pairs = [(room, day) for day in weekdays for room in rooms]
+    num_slots = len(room_day_pairs)
 
-    # Step 3: Calculate number of slots per surgeon, with randomness
-    slots_per_surgeon: Dict[Surgeon, int] = {}
-    for s in surgeons:
-        base = (surgeon_totals[s] / total_weight) * total_slots
-        variation = 1.0 + rng.uniform(
-            -params.slot_randomness_scale, params.slot_randomness_scale
+    if num_slots == 0:
+        raise ValueError(
+            "No room-day pairs available. Provide non-empty rooms and weekdays."
         )
-        slots_per_surgeon[s] = max(1, int(base * variation))
 
-    # Step 4: Greedy compact assignment using randomized room-day buckets
-    # Track per-surgeon, per-weekday assignment counts
-    surgeon_weekday_counts: Dict[Surgeon, Dict[Weekday, int]] = defaultdict(
-        lambda: defaultdict(int)
-    )
-    slot_buckets: Dict[Tuple[Room, Weekday], List[int]] = defaultdict(list)
-    for room, day, slot_idx in slots:
-        slot_buckets[(room, day)].append(slot_idx)
+    # Step 3: Generate schedule for each surgeon via Dirichlet sampling
+    schedule: Schedule = {}
 
-    slot_assignments: Dict[Tuple[Room, Weekday, int], Surgeon] = {}
-    used_slots = set()
-    sorted_surgeons = sorted(
-        surgeons, key=lambda s: -surgeon_totals[s]
-    )  # busiest first
+    for surgeon in surgeons:
+        workload = surgeon_workloads[surgeon]
 
-    for surgeon in sorted_surgeons:
-        remaining = slots_per_surgeon[surgeon]
-        room_day_keys = list(slot_buckets.keys())
-        rng.shuffle(room_day_keys)  # random order per surgeon
+        # Compute concentration: busier surgeons have lower concentration (more spread out)
+        # concentration = base / (1 + scaling * workload)
+        concentration = params.base_concentration / (
+            1.0 + params.workload_scaling * workload
+        )
 
-        for room, day in room_day_keys:
-            # Skip if surgeon already has max slots for this weekday
-            if surgeon_weekday_counts[surgeon][day] >= params.slots_per_day:
-                continue
-            free_slots = [
-                idx
-                for idx in slot_buckets[(room, day)]
-                if (room, day, idx) not in used_slots
-            ]
-            for slot_idx in free_slots:
-                # stop if we have reached the day's limit
-                if surgeon_weekday_counts[surgeon][day] >= params.slots_per_day:
-                    break
-                # stop if surgeon has enough slots
-                if remaining <= 0:
-                    break
-                slot = (room, day, slot_idx)
-                slot_assignments[slot] = surgeon
-                used_slots.add(slot)
-                remaining -= 1
-                surgeon_weekday_counts[surgeon][day] += 1
-            if remaining <= 0:
-                break
+        # Sample from Dirichlet: weights for each (room, day) pair
+        alpha = np.full(num_slots, concentration)
+        weights = rng.dirichlet(alpha)
 
-    # Step 5: Entropy - swap slot assignments between surgeons
-    num_swaps = int(params.entropy * len(slot_assignments))
-    assigned_slots = list(slot_assignments.keys())
+        # Apply sparsity threshold: zero out low-probability assignments
+        if params.sparsity_threshold > 0:
+            weights[weights < params.sparsity_threshold] = 0.0
 
-    for _ in range(num_swaps):
-        a, b = map(tuple, rng.choice(assigned_slots, 2, replace=False))
-        sa, sb = slot_assignments[a], slot_assignments[b]
-        if sa != sb:
-            slot_assignments[a], slot_assignments[b] = sb, sa
+            # Renormalize (only if there are non-zero weights remaining)
+            total = weights.sum()
+            if total > 0:
+                weights = weights / total
+            else:
+                # If all weights were below threshold, keep the largest one
+                max_idx = np.argmax(rng.random(num_slots))  # Random fallback
+                weights = np.zeros(num_slots)
+                weights[max_idx] = 1.0
 
-    # Step 6: Aggregate into final schedule (surgeon, room, weekday)
-    counts: Dict[Tuple[Surgeon, Room, Weekday], int] = defaultdict(int)
-    for (room, day, _), surgeon in slot_assignments.items():
-        counts[(surgeon, room, day)] += 1
-
-    total_assigned = sum(counts.values())
-    schedule: Schedule = {key: val / total_assigned for key, val in counts.items()}
+        # Store non-zero weights in flat dictionary with (surgeon, room, day) keys
+        for (room, day), weight in zip(room_day_pairs, weights):
+            if weight > 0:
+                schedule[(surgeon, room, day)] = float(weight)
 
     return schedule

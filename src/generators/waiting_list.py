@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 import math
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 
@@ -12,101 +14,119 @@ def generate_waiting_list(
     frequency_data: Dict[Tuple[OperationCard, Surgeon], float],
     duration_data: Dict[Tuple[OperationCard, Surgeon], DurationCell],
     priority_data: Dict[OperationCard, Dict[str, int]],
-    admission_data: Dict[OperationCard, Dict[str, Union[float, Tuple[float, float]]]],
-    admission_dist: bool = True,
+    admission_data: Dict[OperationCard, Dict[str, float]],
     rng: Optional[np.random.Generator] = None,
 ) -> List[Surgery]:
-    """Generate a waiting list of surgeries based on frequency, duration, and window data.
+    """
+    Generate a waiting list of surgeries by sampling from generated distributions.
+
+    This function creates a list of Surgery objects by:
+    1. Sampling (operation_card, surgeon) pairs from frequency_data
+    2. Computing expected duration from lognormal parameters
+    3. Extracting priority parameters (operate_by, allowed_changes)
+    4. Sampling ICU/ward admission and length of stay
+
+    The waiting list represents patients waiting for surgery, each with:
+    - Surgical procedure and assigned surgeon
+    - Expected operation duration
+    - Priority deadline (operate_by days)
+    - Rescheduling flexibility (allowed_changes)
+    - Postoperative care needs (ICU/ward admission and LOS)
 
     Parameters
     ----------
     n : int
         Number of surgeries to generate.
     frequency_data : Dict[Tuple[OperationCard, Surgeon], float]
-        Dictionary mapping (operation card, surgeon) pairs to their frequencies.
-    duration_data : Dict[str, Tuple[float, float]]
-        Dictionary mapping operation cards to their duration distributions (mean log and std log).
+        Joint frequencies from generate_frequency_data(). Normalized probabilities
+        for sampling (operation_card, surgeon) pairs.
+    duration_data : Dict[Tuple[OperationCard, Surgeon], DurationCell]
+        Lognormal duration parameters from generate_duration_data(). Each cell
+        contains {"mu", "sigma", "gamma"} for 3-parameter lognormal.
     priority_data : Dict[OperationCard, Dict[str, int]]
-        Dictionary mapping operation cards to their operate_by day and allowed_changes.
-    admission_data : Dict[OperationCard, Dict[str, Union[float, Tuple[float, float]]]]
-        Dictionary mapping operation cards to their admission data.
-        Each entry contains a dictionary with keys "p_icu", "p_ward", "icu_los", and "ward_los".
-        - "p_icu" is the probability of ICU admission.
-        - "p_ward" is the probability of ward admission.
-        - "icu_los" is a tuple (mean, std) for ICU length of stay.
-        - "ward_los" is a tuple (mean, std) for ward length of stay.
-    admission_dist : bool, optional
-        Whether to interpret the values in admission_data as distribution parameters, by default True.
-        If False, one of the values is used directly.
-    rng : Optional[np.random.Generator], optional
-        Numpy random number generator for reproducibility, by default None
+        Priority parameters from generate_priority_data(). Each card has:
+        - "operate_by": Maximum days from registration to surgery
+        - "allowed_changes": Number of times surgery can be rescheduled
+    admission_data : Dict[OperationCard, Dict[str, float]]
+        Admission parameters from generate_admission_data(). Each card has:
+        - "p_icu": Probability of ICU admission
+        - "p_ward": Probability of ward admission
+        - "icu_los_mu": ICU LOS lognormal μ parameter
+        - "icu_los_sigma": ICU LOS lognormal σ parameter
+        - "ward_los_mu": Ward LOS lognormal μ parameter
+        - "ward_los_sigma": Ward LOS lognormal σ parameter
+    rng : Optional[np.random.Generator]
+        Random number generator for reproducibility.
 
     Returns
     -------
     List[Surgery]
-        List of Surgery objects representing the generated waiting list.
+        List of Surgery objects with sampled attributes. Each Surgery has:
+        - operation_card_id, surgeon_id: Sampled pair
+        - expected_duration: Integer duration in minutes
+        - days_since_registration: Always 0 (all just registered)
+        - operate_by: Deadline in days
+        - allowed_changes: Number of reschedules allowed
+        - allowed_days_moved_plus/minus: Days surgery can be moved (derived)
+        - icu, ward: Boolean admission flags
+        - los_icu, los_ward: Integer length of stay in days (0 if not admitted)
     """
-
     if rng is None:
         rng = np.random.default_rng()
 
     # Normalize frequencies for sampling
-    tuples = list(frequency_data.keys())
-    weights = np.array([frequency_data[t] for t in tuples], dtype=np.float64)
+    pairs = list(frequency_data.keys())
+    weights = np.array([frequency_data[pair] for pair in pairs], dtype=np.float64)
     weights /= weights.sum()
 
-    waiting_list = []
-    for i in range(n):
-        operation_card, surgeon = rng.choice(tuples, p=weights, size=1)[0]
+    waiting_list: List[Surgery] = []
 
-        # Duration (log-normal expected value)
-        operation_card: OperationCard = str(operation_card)
-        surgeon: Surgeon = int(surgeon)
+    for _ in range(n):
+        # Sample (operation_card, surgeon) pair
+        operation_card, surgeon = pairs[rng.choice(len(pairs), p=weights)]
+
+        # Get duration parameters and compute expected duration
         cell = duration_data[(operation_card, surgeon)]
         mu = cell["mu"]
         sigma = cell["sigma"]
         gamma = cell["gamma"]
-        expected_duration = int(gamma + np.exp(mu + 0.5 * sigma**2))
+        # Expected value of 3-parameter lognormal: E[X] = γ + exp(μ + σ²/2)
+        expected_duration = int(round(gamma + np.exp(mu + 0.5 * sigma**2)))
 
-        # Priority and allowed changes
+        # Get priority parameters
         priority_info = priority_data[operation_card]
-        operate_by: int = priority_info["operate_by"]  # type: ignore
-        allowed_changes: int = priority_info["allowed_changes"]  # type: ignore
+        operate_by: int = priority_info["operate_by"]
+        allowed_changes: int = priority_info["allowed_changes"]
+
+        # Compute allowed days moved (flexibility for rescheduling)
+        # These multipliers reflect asymmetric scheduling flexibility:
+        # - Moving forward (delay): More flexible, can delay by ~1 week per change
+        # - Moving backward (expedite): Less flexible, can only expedite by ~1 day per change
         allowed_days_moved_plus: int = allowed_changes * 7
         allowed_days_moved_minus: int = allowed_changes * 1
 
-        # Admission information
+        # Get admission parameters
         admission_info = admission_data[operation_card]
-        icu: bool = rng.random() < admission_info["p_icu"]  # type: ignore
-        ward: bool = rng.random() < admission_info["p_ward"]  # type: ignore
-        if not admission_dist:
-            los_icu = (
-                int(math.ceil(rng.choice(admission_info["icu_los"]))) if icu else 0
-            )
-            los_ward = (
-                int(math.ceil(rng.choice(admission_info["ward_los"]))) if ward else 0
-            )
+
+        # Sample ICU admission
+        icu: bool = rng.random() < admission_info["p_icu"]
+        if icu:
+            # Sample ICU LOS from lognormal, round to integer days
+            icu_mu = admission_info["icu_los_mu"]
+            icu_sigma = admission_info["icu_los_sigma"]
+            los_icu = math.ceil(np.exp(rng.normal(icu_mu, icu_sigma)))
         else:
-            los_icu: int = (
-                math.ceil(
-                    rng.lognormal(
-                        mean=admission_info["icu_los"][0],  # type: ignore
-                        sigma=admission_info["icu_los"][1],  # type: ignore
-                    )
-                )
-                if icu
-                else 0
-            )
-            los_ward: int = (
-                math.ceil(
-                    rng.lognormal(
-                        mean=admission_info["ward_los"][0],  # type: ignore
-                        sigma=admission_info["ward_los"][1],  # type: ignore
-                    )
-                )
-                if ward
-                else 0
-            )
+            los_icu = 0
+
+        # Sample ward admission
+        ward: bool = rng.random() < admission_info["p_ward"]
+        if ward:
+            # Sample ward LOS from lognormal, round to integer days
+            ward_mu = admission_info["ward_los_mu"]
+            ward_sigma = admission_info["ward_los_sigma"]
+            los_ward = math.ceil(np.exp(rng.normal(ward_mu, ward_sigma)))
+        else:
+            los_ward = 0
 
         waiting_list.append(
             Surgery(
