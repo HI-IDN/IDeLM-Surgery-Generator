@@ -329,6 +329,50 @@ def plot_schedule(schedule, n_surgeons: int) -> go.Figure:
     return fig
 
 
+def plot_schedule_desirability(schedule) -> go.Figure:
+    """Heatmap: sum of desirability scores for every room × day combination."""
+    from collections import defaultdict
+
+    rooms = sorted({r for (_, r, _) in schedule.keys()})
+    days = sorted({d for (_, _, d) in schedule.keys()})
+
+    room_day_scores: dict[tuple, float] = defaultdict(float)
+    for (s, r, d), score in schedule.items():
+        room_day_scores[(r, d)] += score
+
+    z = [[room_day_scores.get((r, d), 0.0) for d in days] for r in rooms]
+    hover = [
+        [
+            f"Room {r} · {DAY_NAMES[d]}"
+            f"<br>Total desirability: {room_day_scores.get((r, d), 0.0):.4f}"
+            for d in days
+        ]
+        for r in rooms
+    ]
+
+    fig = go.Figure(
+        go.Heatmap(
+            z=z,
+            x=[DAY_NAMES[d] for d in days],
+            y=[f"Room {r}" for r in rooms],
+            colorscale="Viridis",
+            hovertext=hover,
+            hovertemplate="%{hovertext}<extra></extra>",
+            colorbar=dict(title="Total<br>Desirability"),
+        )
+    )
+
+    fig.update_layout(
+        height=max(300, 70 * len(rooms) + 140),
+        template="plotly_dark",
+        title_text="Total Desirability Score per Room–Day",
+        title_font_size=18,
+        xaxis=dict(title="Day of Week"),
+        yaxis=dict(title="Room", autorange="reversed"),
+    )
+    return fig
+
+
 def plot_duration_data(duration_data, top_n: int = 20) -> go.Figure:
     """Expected-duration box plots per op-card + kappa distribution."""
     from collections import defaultdict
@@ -568,6 +612,10 @@ def visualize(output_path: str | Path = "surgery_data_dashboard.html") -> Path:
         ("🏥 Waiting List Summary", plot_waiting_list(waiting_list)),
         ("📊 Case Mix & Surgeon–Card Frequencies", plot_case_mix(frequency_data)),
         ("📅 Weekly Schedule Distribution", plot_schedule(schedule, n_surgeons=10)),
+        (
+            "🗓 Desirability Score per Room–Day",
+            plot_schedule_desirability(schedule),
+        ),
         ("⏱ Duration Parameters", plot_duration_data(duration_data)),
         (
             "⚖️ Priority & Admission",

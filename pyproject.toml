@@ -1,7 +1,11 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "idelm-surgery-generator"
 version = "0.1.0"
-description = "Add your description here"
+description = "Synthetic surgical scheduling data generator for OR scheduling research"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
@@ -10,3 +14,7 @@ dependencies = [
     "plotly>=6.5.2",
     "pydantic>=2.12.5",
 ]
+
+[project.scripts]
+idelm-surgery-generate = "idelm_surgery_generator.main:main"
+idelm-surgery-visualize = "idelm_surgery_generator.visualize:visualize"
